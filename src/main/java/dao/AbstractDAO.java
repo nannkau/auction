@@ -10,7 +10,7 @@ import java.util.List;
 public abstract class AbstractDAO <T,ID extends Serializable> {
     private Class<T> clazz;
 
-    private EntityManager entityManager;
+    protected EntityManager entityManager;
     private  EntityManagerFactory entityManagerFactory;
     private EntityTransaction transaction;
     public AbstractDAO() {
