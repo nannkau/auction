@@ -1,33 +1,38 @@
 package service;
 
+import dao.PriceDAO;
 import dao.UserDAO;
+import dto.OfferForm;
 import dto.Request;
 import dto.Response;
 import dto.UserForm;
+import entity.Price;
+import entity.Product;
 import entity.User;
+import job.MyJob;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.lang3.ObjectUtils;
+import org.quartz.*;
+import org.quartz.impl.StdSchedulerFactory;
 import utils.HashUtil;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
+import java.util.*;
 
 public class ServerService extends Thread {
 
     private ServerSocket serverSocket;
-    private Map<String, ClientHandler> clientHandlers;
-    private Map<String,User> userOnline;
+    private static Map<String, ClientHandler> clientHandlers;
+    public static Map<String,Boolean> userOnline;
+    public static Product product;
 
     public ServerService() {
         this.clientHandlers = new HashMap<>();
         this.userOnline = new HashMap<>();
+        startJob();
     }
 
     public void start(int port) {
@@ -39,7 +44,7 @@ public class ServerService extends Thread {
             while (true) {
                 ClientHandler clientHandler = new ClientHandler(serverSocket.accept());
                 clientHandler.start();
-                this.clientHandlers.put(clientHandler.getUid(), clientHandler);
+                this.clientHandlers.put(clientHandler.getUsername(), clientHandler);
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -54,27 +59,61 @@ public class ServerService extends Thread {
         }
     }
 
-    private List<String> getUserIdOnline() {
-        return this.clientHandlers.values().stream()
-                .map(ClientHandler::getUid)
-                .collect(Collectors.toList());
+    public static void unblockAll(){
+        if (userOnline.size()<1){
+            System.out.println("no client connect to server");
+            return;
+        }
+        Map<String,Boolean> tmp=userOnline;
+        for (Map.Entry<String, Boolean> user : tmp.entrySet()) {
+            userOnline.put(user.getKey(), true);
+
+        }
     }
+    public static void sendAll(String message) {
+        if (clientHandlers.size()<1){
+            System.out.println("no client connect to server");
+            return;
+        }
+        clientHandlers.entrySet().forEach(p -> {
+            Response response= new Response();
+            response.setData(message);
+            response.setStatusCode(200);
+            try {
+                p.getValue().response(response);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+    private void startJob(){
+        Trigger trigger = TriggerBuilder.newTrigger().withIdentity("triggerName", "group1")
+                .withSchedule(SimpleScheduleBuilder.simpleSchedule().withIntervalInSeconds(60).repeatForever()).build();
 
+        JobDetail job = JobBuilder.newJob(MyJob.class)
+                .withIdentity("jobName", "group1").build();
+        Scheduler scheduler = null;
+        try {
+            scheduler = new StdSchedulerFactory().getScheduler();
+            scheduler.start();
+            scheduler.scheduleJob(job, trigger);
+        } catch (SchedulerException e) {
+            e.printStackTrace();
+        }
 
+    }
     @Getter
     @Setter
     private class ClientHandler extends Thread {
         private Socket clientSocket;
         private ObjectInputStream in;
         private ObjectOutputStream out;
-        private String uid;
         private String username;
 
         public ClientHandler(Socket socket) throws IOException {
             this.clientSocket = socket;
             out = new ObjectOutputStream(clientSocket.getOutputStream());
             in = new ObjectInputStream(clientSocket.getInputStream());
-            this.uid = UUID.randomUUID().toString();
         }
 
         private void response(Response response) throws IOException {
@@ -90,65 +129,73 @@ public class ServerService extends Thread {
                     if (ObjectUtils.isNotEmpty(input)) {
                         Request request = (Request) input;
                         switch (request.getAction()) {
-                            case CONNECT:
-                            {
-                                Response response= new Response();
-                                response.setData("connected to server");
-                                response.setStatusCode(200);
-                                this.response(response);
-                            }
-                            break;
+//                            case CONNECT:
+//                            {
+//                                Response response= new Response();
+//                                response.setData("connected to server");
+//                                response.setStatusCode(200);
+//                                this.response(response);
+//                            }
+//                            break;
                             case LOGIN: {
                                 UserDAO userDAO= new UserDAO();
                                 UserForm userForm= (UserForm) request.getData();
+                                this.username = userForm.getUsername();
                                 User result=userDAO.findByUsernameAndPassword(userForm.getUsername(), HashUtil.hashPassword(userForm.getPassword()));
-                                if (ObjectUtils.isNotEmpty(result)){
-                                    userOnline.put(uid,result);
+                                if (ObjectUtils.isNotEmpty(result)||!(userOnline.get(this.username))){
+                                    userOnline.put(this.username,false);
                                     Response response= new Response();
-                                    response.setData("login success");
+                                    response.setData("đăng nhập thành công /n số tiền bạn hiện có là: "
+                                            + result.getBalance().toString()+"/n Sản phẩm đang đấu giá là:"+product.getName()
+                                            +"với giá khởi điểm là "+product.getFirstPrice().toString());
                                     response.setStatusCode(200);
                                     this.response(response);
                                 }
                                 else{
                                     Response response= new Response();
-                                    response.setData("invalid username or password");
+                                    response.setData("không thể đăng nhập");
                                     response.setStatusCode(403);
                                     this.response(response);
-                                    clientHandlers.remove(this.getUid());
+                                    clientHandlers.remove(this.username);
                                 }
                                 break;
                             }
-//                            case SEND_MESSAGE_TO_USER_SPECIFIC: {
-//                                ClientHandler clientHandler = clientHandlers.get(((MessageRequest) (request)).getUid());
-//                                if (clientHandler == null) {
-//                                    this.response(MessageResponse.builder()
-//                                            .statusCode(StatusCode.BAD_REQUEST)
-//                                            .build());
-//                                } else {
-//                                    clientHandler.response(MessageResponse.builder()
-//                                            .message(((MessageRequest) (request)).getMessage())
-//                                            .senderId(this.getUid())
-//                                            .statusCode(StatusCode.OK)
-//                                            .build());
-//                                }
-//                                break;
-//                            }
-//                            case CHAT_ALL: {
-//                                GroupMessageRequest groupMessageRequest = (GroupMessageRequest) request;
-//                                for (String s : groupMessageRequest.getUids()) {
-//                                    ClientHandler clientHandler = clientHandlers.get(s);
-//                                    if (clientHandler != null) {
-//                                        clientHandler.response(MessageResponse.builder()
-//                                                .senderId(this.getUid())
-//                                                .message(groupMessageRequest.getMessage())
-//                                                .statusCode(StatusCode.OK)
-//                                                .build());
-//                                    }
-//                                }
-//                                break;
-//                            }
+                            case OFFER: {
+                                OfferForm offer = (OfferForm) request.getData();
+                                UserDAO userDAO= new UserDAO();
+                                User user=userDAO.findByUsername(this.username);
+                                if (offer.getPrice()>user.getBalance() ||user.getBalance()<product.getFirstPrice()){
+                                    Response response= new Response();
+                                    response.setData("giá không hợp lệ");
+                                    response.setStatusCode(400);
+                                    this.response(response);
+                                }
+                                else {
+                                    PriceDAO priceDAO= new PriceDAO();
+                                    Price maxPrice= priceDAO.getPrice(product.getId());
+                                    if (ObjectUtils.isEmpty(maxPrice)||maxPrice.getValue()<offer.getPrice()){
+                                        unblockAll();
+                                        User maxPriceUser= userDAO.findByUsername(this.username);
+                                        maxPriceUser.setBlock(true);
+                                        userOnline.put(this.username,true);
+                                    }
+                                    Price price= new Price();
+                                    price.setUser(userDAO.findByUsername(this.username));
+                                    price.setValue(offer.getPrice());
+                                    price.setProduct(product);
+                                    price.setTimeCreated(new Date());
+
+                                    priceDAO.create(price);
+                                    Response response= new Response();
+                                    response.setData("mức giá của bạn đã được ghi nhận");
+                                    response.setStatusCode(200);
+                                    this.response(response);
+                                }
+                                break;
+                            }
+//
                             case DISCONNECT: {
-                                clientHandlers.remove(this.getUid());
+                                clientHandlers.remove(this.username);
                                 break;
                             }
                             default:

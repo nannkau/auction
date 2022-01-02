@@ -17,5 +17,5 @@ public class User {
     private Integer balance;
     private Boolean block;
     @OneToMany(mappedBy = "user")
-    private List<Product> products;
+    private List<Price> prices;
 }

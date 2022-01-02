@@ -15,11 +15,9 @@ public class Product {
     private Integer id;
     private String name;
     private Date timeCreated;
-    @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
+
     @OneToMany(mappedBy = "product")
-    private List<Price> price;
-    private Integer finishPrice;
+    private List<Price> prices;
+    private Integer firstPrice;
     private Boolean status;
 }
