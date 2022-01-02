@@ -66,7 +66,7 @@ public class ServerService extends Thread {
         }
         Map<String,Boolean> tmp=userOnline;
         for (Map.Entry<String, Boolean> user : tmp.entrySet()) {
-            userOnline.put(user.getKey(), true);
+            userOnline.put(user.getKey(), false);
 
         }
     }

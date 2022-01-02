@@ -2,8 +2,10 @@ package job;
 
 import dao.PriceDAO;
 import dao.ProductDAO;
+import dao.UserDAO;
 import entity.Price;
 import entity.Product;
+import entity.User;
 import org.apache.commons.lang3.ObjectUtils;
 import org.quartz.Job;
 import org.quartz.JobExecutionContext;
@@ -40,6 +42,10 @@ public class MyJob implements Job {
                 ServerService.sendAll(message.toString());
                 product.setStatus(true);
                 dao.update(product);
+                UserDAO userDAO= new UserDAO();
+                User user= userDAO.findByUsername(price.getUser().getUsername());
+                user.setBalance(user.getBalance()-price.getValue());
+                userDAO.update(user);
             }
 
             List<Product> products= dao.getProducts();
